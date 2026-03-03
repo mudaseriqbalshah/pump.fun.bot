@@ -1,0 +1,40 @@
+# ============================================================
+# Pump.fun Bot — Main Configuration
+# Endpoints and secrets go in .env — not here.
+# ============================================================
+
+rpc:
+  strategy: round-robin       # round-robin | fastest | failover
+  health_check_interval_s: 30
+
+telegram:
+  channels:
+    - id: -1001234567890
+      name: "alpha-calls"
+      weight: 1.0
+    - id: -1009876543210
+      name: "gem-calls"
+      weight: 0.8
+
+discord:
+  channels:
+    - id: "1234567890123456789"
+      name: "pump-calls"
+      weight: 0.9
+
+trading:
+  wallet_keypair_path: ~/.config/solana/id.json
+  max_position_sol: 0.5          # max SOL to spend per trade
+  max_open_positions: 5          # max concurrent open positions
+  max_daily_loss_sol: 3.0        # hard stop: halt trading for the day
+  max_bonding_curve_pct: 50      # only buy if bonding curve < 50% complete
+  min_signal_confidence: 0.6     # minimum confidence score to act on a signal
+  profit_target_pct: 200         # sell when PnL reaches +200% (2x)
+  stop_loss_pct: -30             # sell when PnL drops below -30%
+  slippage_bps: 1000             # 10% slippage tolerance
+  buy_retry_count: 3             # number of RPC retries on buy failure
+  signal_dedup_window_s: 60      # ignore duplicate signals within 60s window
+
+notifications:
+  telegram_bot_token: ""         # override in .env via NOTIFY_TELEGRAM_BOT_TOKEN
+  telegram_chat_id: ""           # override in .env via NOTIFY_TELEGRAM_CHAT_ID

@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment — NEVER commit secrets
+.env
+
+# Database files
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Telegram session files (gramjs auth)
+*.session
+*.session.json
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/settings.json

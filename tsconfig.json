@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ESNext"],
+    "outDir": "dist",
+    "rootDir": "src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "paths": {
+      "@config": ["./config/index.js"],
+      "@config/*": ["./config/*"],
+      "@rpc/*": ["./rpc/*"],
+      "@signals/*": ["./signals/*"],
+      "@scanner/*": ["./scanner/*"],
+      "@trader/*": ["./trader/*"],
+      "@dex/*": ["./dex/*"],
+      "@db/*": ["./db/*"],
+      "@notifications/*": ["./notifications/*"],
+      "@utils/*": ["./utils/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "tests"]
+}

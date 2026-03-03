@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm install)",
+      "Bash(node --version)",
+      "Bash(pnpm info better-sqlite3 versions --json)",
+      "Bash(pnpm info better-sqlite3 version)",
+      "Bash(pnpm typecheck)",
+      "Bash(node -e \"const bigInt = require\\(''big-integer''\\); const x = bigInt\\(1234567890\\); console.log\\(typeof x.toJSNumber, typeof x.valueOf, typeof x.toJSON\\)\")",
+      "Bash(node --input-type=module -e \"import bigInt from ''/Users/mudaseriqbal/Downloads/pump-fun-bot/node_modules/big-integer/BigInteger.js''; const x = bigInt\\(1234567890\\); console.log\\(Object.getOwnPropertyNames\\(Object.getPrototypeOf\\(x\\)\\).filter\\(m => m.includes\\(''JS''\\) || m.includes\\(''Number''\\) || m.includes\\(''number''\\)\\)\\)\")",
+      "Bash(node -e \"process.chdir\\(''/Users/mudaseriqbal/Downloads/pump-fun-bot''\\); const b = require\\(''./node_modules/.pnpm/big-integer@1.6.52/node_modules/big-integer/BigInteger.js''\\); const x = b\\(1234567890\\); console.log\\(typeof x.toJSNumber, x.toJSNumber\\(\\)\\)\")",
+      "Bash(grep -rn \"export\" /Users/mudaseriqbal/Downloads/pump-fun-bot/node_modules/telegram/sessions/*.d.ts)",
+      "Bash(ls /Users/mudaseriqbal/Downloads/pump-fun-bot/node_modules/telegram/sessions/*.js)",
+      "Bash(node -e \"const p = require\\(''./node_modules/telegram/package.json''\\); console.log\\(''type:'', p.type, ''main:'', p.main\\)\")",
+      "Bash(pnpm test)",
+      "Bash(pnpm tsc --noEmit)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k:d.get\\(k\\) for k in [''exports'',''main'',''module'',''types'']}, indent=2\\)\\)\")",
+      "Bash(chmod +x /Users/mudaseriqbal/Downloads/pump-fun-bot/scripts/install-service.sh /Users/mudaseriqbal/Downloads/pump-fun-bot/scripts/uninstall-service.sh)",
+      "Bash(bash -n /Users/mudaseriqbal/Downloads/pump-fun-bot/scripts/install-service.sh)",
+      "Bash(bash -n /Users/mudaseriqbal/Downloads/pump-fun-bot/scripts/uninstall-service.sh)"
+    ]
+  }
+}

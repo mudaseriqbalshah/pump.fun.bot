@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent for pump-fun-bot.
+  Installed by scripts/install-service.sh — do not edit the installed copy directly.
+  Re-run the install script after changing this template.
+-->
+<plist version="1.0">
+<dict>
+  <!-- ── Identity ───────────────────────────────────────────────── -->
+  <key>Label</key>
+  <string>com.pumpbot</string>
+
+  <!-- ── Program ───────────────────────────────────────────────── -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>dist/index.js</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__PROJECT_DIR__</string>
+
+  <!-- ── Environment ───────────────────────────────────────────── -->
+  <!-- Inherit PATH from shell so native add-ons (better-sqlite3) resolve. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NODE_ENV</key>
+    <string>production</string>
+    <key>PATH</key>
+    <string>__PATH__</string>
+  </dict>
+
+  <!-- ── Logging ───────────────────────────────────────────────── -->
+  <key>StandardOutPath</key>
+  <string>__PROJECT_DIR__/data/logs/stdout.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>__PROJECT_DIR__/data/logs/stderr.log</string>
+
+  <!-- ── Restart policy ─────────────────────────────────────────── -->
+  <!-- Auto-restart on crash with 5-second throttle. -->
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+
+  <!-- Start automatically when the agent is loaded. -->
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>
