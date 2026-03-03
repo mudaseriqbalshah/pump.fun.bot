@@ -82,12 +82,17 @@ export class TelegramNotifier {
     tokenAddress: string;
     pnlSol: number;
     pnlPct: number;
-    trigger: 'profit_target' | 'stop_loss';
+    trigger: 'profit_target' | 'stop_loss' | 'ai_early';
     heldMinutes?: number;
   }): void {
-    const isProfit = opts.trigger === 'profit_target';
-    const emoji = isProfit ? '💰' : '🔴';
-    const triggerLabel = isProfit ? 'Profit target hit' : 'Stop-loss hit';
+    const emoji =
+      opts.trigger === 'profit_target' ? '💰' : opts.trigger === 'ai_early' ? '🤖' : '🔴';
+    const triggerLabel =
+      opts.trigger === 'profit_target'
+        ? 'Profit target hit'
+        : opts.trigger === 'ai_early'
+          ? 'AI early exit'
+          : 'Stop-loss hit';
     const pnlSign = opts.pnlSol >= 0 ? '+' : '';
 
     const lines = [

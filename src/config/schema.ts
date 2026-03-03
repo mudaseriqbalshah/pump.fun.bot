@@ -34,6 +34,9 @@ export const EnvSchema = z.object({
   // Notification Telegram bot (optional — omit to disable notifications)
   NOTIFY_TELEGRAM_BOT_TOKEN: z.string().default(''),
   NOTIFY_TELEGRAM_CHAT_ID: z.string().default(''),
+
+  // OpenAI API (optional — omit to disable AI advisor)
+  OPENAI_API_KEY: z.string().default(''),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

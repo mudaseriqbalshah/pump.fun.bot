@@ -46,7 +46,7 @@ export interface PositionClosedEvent {
   tokenAddress: string;
   pnlSol: number;
   pnlPct: number;
-  trigger: 'profit_target' | 'stop_loss';
+  trigger: 'profit_target' | 'stop_loss' | 'ai_early';
 }
 
 // ---------------------------------------------------------------------------

@@ -33,6 +33,7 @@ import { PositionTracker } from './trader/position.js';
 import { RaydiumDetector } from './dex/raydium.js';
 import { JupiterDetector } from './dex/jupiter.js';
 import { TelegramNotifier } from './notifications/telegram.js';
+import { TradeAdvisor } from './ai/advisor.js';
 import { logger } from './utils/logger.js';
 import type { Signal } from './signals/types.js';
 import type { PositionClosedEvent } from './trader/position.js';
@@ -63,7 +64,8 @@ async function main(): Promise<void> {
   // 5. Trading components
   const riskManager = new RiskManager(tradingConfig, db);
   const buyer = new Buyer(tradingConfig, rpcManager, riskManager, bondingTracker, db);
-  const seller = new Seller(tradingConfig, rpcManager, db);
+  const advisor = new TradeAdvisor(env.OPENAI_API_KEY, tradingConfig);
+  const seller = new Seller(tradingConfig, rpcManager, db, advisor);
 
   // 6. Position tracker — state machine: bonding → dex_launched → sell
   const positionTracker = new PositionTracker(
@@ -112,9 +114,40 @@ async function main(): Promise<void> {
   // Track when positions were opened so we can report hold time.
   const openedAt = new Map<string, number>();
 
-  // Qualified signal → buy → register position
+  // Qualified signal → AI evaluation → buy → register position
   aggregator.on('signal', (signal: Signal) => {
     void (async () => {
+      // AI buy evaluation (optional — falls back gracefully when disabled).
+      if (advisor.isEnabled) {
+        const openPositions = db.getOpenPositions().length;
+        const dailyPnlSol = db.getDailyPnlSol();
+        const curve = await bondingTracker.fetch(signal.tokenAddress);
+        const aiDecision = await advisor.shouldBuy(signal, curve, { openPositions, dailyPnlSol });
+
+        if (!aiDecision.buy) {
+          logger.info(
+            {
+              tokenAddress: signal.tokenAddress,
+              reasoning: aiDecision.reasoning,
+              redFlags: aiDecision.redFlags,
+            },
+            'AI advisor blocked buy',
+          );
+          return;
+        }
+
+        // Scale position size by AI multiplier (clamp to [0.1, 1.0]).
+        const mult = Math.min(1.0, Math.max(0.1, aiDecision.positionSizeMult));
+        if (mult < 1.0) {
+          logger.info(
+            { tokenAddress: signal.tokenAddress, positionSizeMult: mult.toFixed(2) },
+            'AI advisor reduced position size',
+          );
+          // Temporarily adjust signal confidence to propagate the sizing hint to buyer.
+          signal = { ...signal, confidence: signal.confidence * mult };
+        }
+      }
+
       const result = await buyer.buy(signal);
 
       if (result.success) {
@@ -133,11 +166,12 @@ async function main(): Promise<void> {
     })();
   });
 
-  // Position closed → notify
+  // Position closed → notify + clean up advisor state
   positionTracker.on('position_closed', (event: PositionClosedEvent) => {
     const openMs = openedAt.get(event.tokenAddress);
     const heldMinutes = openMs !== undefined ? (Date.now() - openMs) / 60_000 : undefined;
     openedAt.delete(event.tokenAddress);
+    advisor.clearToken(event.tokenAddress);
 
     notifier.notifyPositionClosed({
       tokenAddress: event.tokenAddress,

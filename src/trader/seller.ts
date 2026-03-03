@@ -6,6 +6,7 @@ import type { QuoteResponse, SwapApi } from '@jup-ag/api';
 import type { RpcManager } from '../rpc/manager.js';
 import type { DatabaseClient, PositionStatus } from '../db/client.js';
 import type { TradingConfig } from '../config/schema.js';
+import type { TradeAdvisor } from '../ai/advisor.js';
 import { logger } from '../utils/logger.js';
 
 // ---------------------------------------------------------------------------
@@ -21,7 +22,7 @@ const LAMPORTS_PER_SOL = 1e9;
 // Result types
 // ---------------------------------------------------------------------------
 
-export type SellTrigger = 'profit_target' | 'stop_loss';
+export type SellTrigger = 'profit_target' | 'stop_loss' | 'ai_early';
 
 export type SellResult =
   | {
@@ -43,11 +44,18 @@ export class Seller {
   private readonly db: DatabaseClient;
   private readonly cfg: TradingConfig;
   private readonly jupApi: SwapApi;
+  private readonly advisor: TradeAdvisor | null;
 
-  constructor(cfg: TradingConfig, rpcManager: RpcManager, db: DatabaseClient) {
+  constructor(
+    cfg: TradingConfig,
+    rpcManager: RpcManager,
+    db: DatabaseClient,
+    advisor?: TradeAdvisor,
+  ) {
     this.cfg = cfg;
     this.rpcManager = rpcManager;
     this.db = db;
+    this.advisor = advisor ?? null;
     this.wallet = loadKeypair(cfg.wallet_keypair_path);
     this.jupApi = createJupiterApiClient();
     logger.info({ pubkey: this.wallet.publicKey.toBase58() }, 'Seller wallet loaded');
@@ -106,18 +114,47 @@ export class Seller {
       'Sell evaluation',
     );
 
+    // 4.5 – Optional AI sell recommendation.
+    //   urgency='immediate' → sell right now, bypassing profit/stop thresholds.
+    //   urgency='normal'    → advisory; OR'd with hitProfit so thresholds still rule.
+    //   Stop-loss always fires regardless of AI opinion (safety invariant).
+    let aiImmediateSell = false;
+    let aiNormalSell = false;
+
+    if (this.advisor?.isEnabled) {
+      const heldMinutes = (Date.now() - position.created_at) / 60_000;
+      const aiDecision = await this.advisor.shouldSell({
+        tokenAddress,
+        pnlPct,
+        pnlSol,
+        heldMinutes,
+      });
+      if (aiDecision.sell) {
+        if (aiDecision.urgency === 'immediate') {
+          aiImmediateSell = true;
+        } else {
+          aiNormalSell = true;
+        }
+      }
+    }
+
     // 5. Check thresholds.
     const hitProfit = pnlPct >= this.cfg.profit_target_pct;
     const hitStop = pnlPct <= this.cfg.stop_loss_pct;
+    const shouldSell = hitProfit || hitStop || aiImmediateSell || aiNormalSell;
 
-    if (!hitProfit && !hitStop) {
+    if (!shouldSell) {
       return {
         success: false,
         reason: `PnL ${pnlPct.toFixed(1)}% not at threshold (target: +${this.cfg.profit_target_pct}%, stop: ${this.cfg.stop_loss_pct}%)`,
       };
     }
 
-    const trigger: SellTrigger = hitProfit ? 'profit_target' : 'stop_loss';
+    const trigger: SellTrigger = hitStop
+      ? 'stop_loss'
+      : hitProfit
+        ? 'profit_target'
+        : 'ai_early';
 
     // 6. Execute the swap with retry — each attempt gets a fresh Jupiter tx
     //    (fresh blockhash) and the next RPC endpoint from the pool.
@@ -269,8 +306,15 @@ export class Seller {
   ): void {
     if (!position) return;
 
+    // 'ai_early' maps to profit_target when PnL is positive, stop_loss otherwise.
     const positionStatus: PositionStatus =
-      trigger === 'profit_target' ? 'profit_target' : 'stop_loss';
+      trigger === 'profit_target'
+        ? 'profit_target'
+        : trigger === 'stop_loss'
+          ? 'stop_loss'
+          : pnlPct > 0
+            ? 'profit_target'
+            : 'stop_loss';
 
     try {
       const trade = this.db.getTradeByToken(tokenAddress);

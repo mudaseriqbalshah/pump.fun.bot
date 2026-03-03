@@ -1,6 +1,6 @@
 # pump-fun-bot
 
-A TypeScript trading bot that monitors Discord and Telegram channels for pump.fun token signals, buys before the bonding curve completes, and sells on DEX launch. Designed to run 24/7 on a Mac Mini via launchd.
+A TypeScript trading bot that monitors Discord and Telegram channels for pump.fun token signals, buys before the bonding curve completes, and sells on DEX launch. Includes an optional AI trading advisor powered by OpenAI that evaluates every signal before buying and monitors open positions for early exit opportunities. Designed to run 24/7 on a Mac Mini via launchd.
 
 ---
 
@@ -8,11 +8,13 @@ A TypeScript trading bot that monitors Discord and Telegram channels for pump.fu
 
 1. **Signal detection** — Monitors configured Telegram channels (via MTProto user account) and Discord channels (via bot token) for pump.fun token contract addresses. Each message is scored for confidence based on keyword hype and channel weight.
 2. **Aggregation** — Signals for the same token within a 60-second window are deduplicated. Multi-source signals (seen on both Telegram and Discord) get a +0.2 confidence boost.
-3. **Risk checks** — Before buying, the bot checks: minimum signal confidence, bonding curve completion %, max open positions, daily loss limit, and duplicate position guard.
-4. **Buy** — Executes via `pumpdotfun-sdk` on the bonding curve, with retry across multiple RPC endpoints.
-5. **Position tracking** — Polls the bonding curve every 10 seconds. When graduation is detected, switches to watching for a Raydium CPMM pool (event-driven) with Jupiter as a fallback.
-6. **Sell** — Once the DEX is live, quotes token → WSOL via Jupiter on every tick. Sells when PnL hits profit target (+200% default) or stop-loss (−30% default).
-7. **Notifications** — Sends Telegram alerts for buys, sells, and risk denials.
+3. **AI buy evaluation** *(optional)* — Each qualified signal is evaluated by `gpt-4o` before any buy is attempted. The model sees the signal message, bonding curve state, portfolio context, and bot config, then decides whether to buy and at what position size. If `OPENAI_API_KEY` is not set, this step is skipped entirely.
+4. **Risk checks** — Before buying, the bot checks: minimum signal confidence, bonding curve completion %, max open positions, daily loss limit, and duplicate position guard.
+5. **Buy** — Executes via `pumpdotfun-sdk` on the bonding curve, with retry across multiple RPC endpoints.
+6. **Position tracking** — Polls the bonding curve every 10 seconds. When graduation is detected, switches to watching for a Raydium CPMM pool (event-driven) with Jupiter as a fallback.
+7. **AI sell evaluation** *(optional)* — While a position is open, `gpt-4o-mini` is consulted every 5 minutes per token. It can recommend an early exit (`immediate` urgency bypasses thresholds; `normal` urgency acts only when thresholds are also met). Stop-loss always fires regardless of AI opinion.
+8. **Sell** — Once the DEX is live, quotes token → WSOL via Jupiter on every tick. Sells when PnL hits profit target (+200% default), stop-loss (−30% default), or an AI early-exit recommendation.
+9. **Notifications** — Sends Telegram alerts for buys, sells (💰 profit / 🔴 stop-loss / 🤖 AI early exit), and risk denials.
 
 ---
 
@@ -24,6 +26,7 @@ A TypeScript trading bot that monitors Discord and Telegram channels for pump.fu
 - **Solana wallet** with SOL funded for trading
 - **Telegram API credentials** — from [my.telegram.org/apps](https://my.telegram.org/apps)
 - **Discord bot token** — from [discord.com/developers](https://discord.com/developers/applications)
+- **OpenAI API key** *(optional)* — from [platform.openai.com/api-keys](https://platform.openai.com/api-keys) — enables AI advisor
 
 ---
 
@@ -67,6 +70,7 @@ pnpm dev   # runs via tsx — hot reload, shows OTP prompt in terminal
 | `DISCORD_BOT_TOKEN` | Yes | Discord bot token |
 | `NOTIFY_TELEGRAM_BOT_TOKEN` | No | Bot token for trade alert notifications |
 | `NOTIFY_TELEGRAM_CHAT_ID` | No | Chat/channel ID to receive alerts |
+| `OPENAI_API_KEY` | No | Enables AI buy/sell advisor (gpt-4o + gpt-4o-mini) |
 
 ### `config.yaml`
 
@@ -177,6 +181,8 @@ pump-fun-bot/
 │   ├── db/
 │   │   ├── schema.sql            # Tables: signals, trades, positions, rpc_stats
 │   │   └── client.ts             # better-sqlite3 singleton + typed query methods
+│   ├── ai/
+│   │   └── advisor.ts            # AI trading advisor (OpenAI gpt-4o buy / gpt-4o-mini sell)
 │   ├── notifications/
 │   │   └── telegram.ts           # Telegram Bot API notifier (buy / sell / risk alerts)
 │   └── utils/
@@ -214,6 +220,60 @@ pnpm test
 # Type-check without emitting
 pnpm typecheck
 ```
+
+---
+
+## AI trading advisor
+
+The AI advisor is an optional layer that sits on top of the existing rule-based logic. It never replaces the risk checks or stop-loss — it only adds extra intelligence on top.
+
+### Enable it
+
+Add your OpenAI API key to `.env`:
+
+```
+OPENAI_API_KEY=sk-...
+```
+
+Leave it empty (or omit it) to run the bot in threshold-only mode at zero AI cost.
+
+### Buy decisions — `gpt-4o`
+
+Called once per qualified signal, before any buy is attempted. The model receives:
+
+- Signal source, ticker, raw message text (first 400 chars), confidence score
+- Bonding curve progress % and market cap in SOL
+- Current open position count, today's realised PnL, and bot config limits
+
+It returns a structured JSON decision:
+
+| Field | Type | Description |
+|---|---|---|
+| `buy` | boolean | Whether to proceed with the buy |
+| `confidence` | 0–1 | Model's confidence — currently logged only |
+| `positionSizeMult` | 0.1–1.0 | Scales `max_position_sol` for this trade |
+| `reasoning` | string | One-sentence explanation |
+| `redFlags` | string[] | List of detected risk factors |
+
+If `buy = false` the signal is dropped and logged. If `positionSizeMult < 1.0` the position size is reduced proportionally.
+
+### Sell decisions — `gpt-4o-mini`
+
+Called during every sell evaluation tick (throttled to once per 5 minutes per token). The model receives the current PnL % and SOL, hold time in minutes, and the configured profit/stop thresholds.
+
+It returns:
+
+| Field | Type | Description |
+|---|---|---|
+| `sell` | boolean | Whether to exit early |
+| `urgency` | `normal` \| `immediate` | `immediate` exits right now; `normal` only acts if a threshold is also hit |
+| `reasoning` | string | One-sentence explanation |
+
+**Safety invariant:** stop-loss always fires regardless of the AI's decision. The AI can only recommend *additional* exits, not block mandatory ones.
+
+### Fallback behaviour
+
+Any API error or timeout silently falls back to the existing threshold-only logic — the bot keeps trading without interruption.
 
 ---
 
