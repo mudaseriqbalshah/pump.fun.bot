@@ -37,6 +37,10 @@ export const EnvSchema = z.object({
 
   // OpenAI API (optional — omit to disable AI advisor)
   OPENAI_API_KEY: z.string().default(''),
+
+  // Twitter / X API v2 bearer token (optional — enables Twitter reputation check)
+  // Get yours at: https://developer.twitter.com/en/portal/dashboard
+  TWITTER_BEARER_TOKEN: z.string().default(''),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

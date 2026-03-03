@@ -126,7 +126,11 @@ async function main(): Promise<void> {
         // Fetch bonding curve, token reputation (#1), and trade stats (#3) in parallel.
         const [curve, reputation, tradeStats] = await Promise.all([
           bondingTracker.fetch(signal.tokenAddress),
-          fetchTokenReputation(signal.tokenAddress),
+          fetchTokenReputation(
+            signal.tokenAddress,
+            signal.ticker ?? null,
+            env.TWITTER_BEARER_TOKEN || null,
+          ),
           Promise.resolve(db.getTradeStats()),
         ]);
 

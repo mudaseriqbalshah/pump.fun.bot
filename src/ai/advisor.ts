@@ -343,6 +343,21 @@ function buildBuyPrompt(
         `DEX liquidity: $${reputation.dexLiquidityUsd?.toFixed(0) ?? '?'}`,
       );
     }
+    if (reputation.twitter) {
+      const tw = reputation.twitter;
+      lines.push(
+        '',
+        '### Twitter / X',
+        `Recent mentions: ${tw.mentionCount}`,
+        `Hype tweets: ${tw.hypeMentions}  |  Scam/rug tweets: ${tw.scamMentions}`,
+      );
+      if (tw.sampleTweets.length > 0) {
+        lines.push('Sample tweets:');
+        tw.sampleTweets.forEach((t, i) => lines.push(`  ${i + 1}. ${t}`));
+      }
+    } else {
+      lines.push('Twitter: not configured (no TWITTER_BEARER_TOKEN)');
+    }
     if (reputation.redFlags.length > 0) {
       lines.push(`⚠ Red flags: ${reputation.redFlags.join(' | ')}`);
     } else {
