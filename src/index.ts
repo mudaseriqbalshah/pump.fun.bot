@@ -34,6 +34,7 @@ import { RaydiumDetector } from './dex/raydium.js';
 import { JupiterDetector } from './dex/jupiter.js';
 import { TelegramNotifier } from './notifications/telegram.js';
 import { TradeAdvisor } from './ai/advisor.js';
+import { fetchTokenReputation } from './ai/reputation.js';
 import { logger } from './utils/logger.js';
 import type { Signal } from './signals/types.js';
 import type { PositionClosedEvent } from './trader/position.js';
@@ -121,8 +122,21 @@ async function main(): Promise<void> {
       if (advisor.isEnabled) {
         const openPositions = db.getOpenPositions().length;
         const dailyPnlSol = db.getDailyPnlSol();
-        const curve = await bondingTracker.fetch(signal.tokenAddress);
-        const aiDecision = await advisor.shouldBuy(signal, curve, { openPositions, dailyPnlSol });
+
+        // Fetch bonding curve, token reputation (#1), and trade stats (#3) in parallel.
+        const [curve, reputation, tradeStats] = await Promise.all([
+          bondingTracker.fetch(signal.tokenAddress),
+          fetchTokenReputation(signal.tokenAddress),
+          Promise.resolve(db.getTradeStats()),
+        ]);
+
+        const aiDecision = await advisor.shouldBuy(
+          signal,
+          curve,
+          { openPositions, dailyPnlSol },
+          reputation,
+          tradeStats,
+        );
 
         if (!aiDecision.buy) {
           logger.info(

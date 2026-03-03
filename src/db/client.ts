@@ -66,6 +66,26 @@ export interface RpcStatsRow {
   last_checked: number;
 }
 
+export interface ChannelStats {
+  totalTrades: number;
+  winRate: number;    // 0–1
+  avgPnlPct: number;
+  avgWinPct: number;
+  avgLossPct: number;
+}
+
+export interface TradeStats {
+  /** Aggregate stats across all closed trades. */
+  overall: ChannelStats;
+  /** Per-channel breakdown keyed by channel_id. */
+  byChannel: Record<string, ChannelStats>;
+  /**
+   * Recent momentum: positive = N-trade winning streak,
+   * negative = N-trade losing streak, 0 = mixed or no data.
+   */
+  recentStreak: number;
+}
+
 // ---------------------------------------------------------------------------
 // Insert / update input types
 // ---------------------------------------------------------------------------
@@ -219,6 +239,88 @@ export class DatabaseClient {
 
   deletePosition(tokenAddress: string): void {
     this.db.prepare(`DELETE FROM positions WHERE token_address = ?`).run(tokenAddress);
+  }
+
+  /**
+   * Returns trading performance stats for use by the AI advisor.
+   * Includes overall win rate, per-channel breakdown, and recent win/loss streak.
+   * All queries are read-only and safe to call frequently.
+   */
+  getTradeStats(): TradeStats {
+    // Overall aggregate
+    const overall = this.db.prepare(`
+      SELECT
+        COUNT(*)                                                   AS total,
+        SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END)             AS wins,
+        AVG(pnl_pct)                                               AS avg_pnl,
+        AVG(CASE WHEN pnl_pct > 0 THEN pnl_pct ELSE NULL END)     AS avg_win,
+        AVG(CASE WHEN pnl_pct <= 0 THEN pnl_pct ELSE NULL END)    AS avg_loss
+      FROM trades
+      WHERE status = 'closed'
+    `).get() as { total: number; wins: number; avg_pnl: number; avg_win: number; avg_loss: number };
+
+    // Per-channel breakdown
+    const channelRows = this.db.prepare(`
+      SELECT
+        s.channel_id,
+        COUNT(*)                                                    AS total,
+        SUM(CASE WHEN t.pnl_pct > 0 THEN 1 ELSE 0 END)            AS wins,
+        AVG(t.pnl_pct)                                              AS avg_pnl,
+        AVG(CASE WHEN t.pnl_pct > 0 THEN t.pnl_pct ELSE NULL END)  AS avg_win,
+        AVG(CASE WHEN t.pnl_pct <= 0 THEN t.pnl_pct ELSE NULL END) AS avg_loss
+      FROM trades t
+      JOIN signals s ON t.signal_id = s.id
+      WHERE t.status = 'closed' AND s.channel_id IS NOT NULL
+      GROUP BY s.channel_id
+      ORDER BY total DESC
+      LIMIT 20
+    `).all() as {
+      channel_id: string;
+      total: number;
+      wins: number;
+      avg_pnl: number;
+      avg_win: number;
+      avg_loss: number;
+    }[];
+
+    // Recent streak — last 8 closed trades
+    const recent = this.db.prepare(`
+      SELECT pnl_pct FROM trades
+      WHERE status = 'closed'
+      ORDER BY closed_at DESC
+      LIMIT 8
+    `).all() as { pnl_pct: number }[];
+
+    let recentStreak = 0;
+    if (recent.length > 0) {
+      const firstIsWin = recent[0].pnl_pct > 0;
+      for (const t of recent) {
+        if ((t.pnl_pct > 0) === firstIsWin) recentStreak += firstIsWin ? 1 : -1;
+        else break;
+      }
+    }
+
+    function toChannelStats(row: {
+      total: number;
+      wins: number;
+      avg_pnl: number;
+      avg_win: number;
+      avg_loss: number;
+    }): ChannelStats {
+      return {
+        totalTrades: row.total,
+        winRate: row.total > 0 ? row.wins / row.total : 0,
+        avgPnlPct: row.avg_pnl ?? 0,
+        avgWinPct: row.avg_win ?? 0,
+        avgLossPct: row.avg_loss ?? 0,
+      };
+    }
+
+    return {
+      overall: toChannelStats(overall),
+      byChannel: Object.fromEntries(channelRows.map((r) => [r.channel_id, toChannelStats(r)])),
+      recentStreak,
+    };
   }
 
   /**

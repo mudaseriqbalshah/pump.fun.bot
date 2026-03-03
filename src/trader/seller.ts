@@ -123,6 +123,9 @@ export class Seller {
 
     if (this.advisor?.isEnabled) {
       const heldMinutes = (Date.now() - position.created_at) / 60_000;
+      // Record price on every tick for velocity calculation (#2).
+      // shouldSell is throttled internally; recordPrice is not.
+      this.advisor.recordPrice(tokenAddress, pnlPct);
       const aiDecision = await this.advisor.shouldSell({
         tokenAddress,
         pnlPct,
