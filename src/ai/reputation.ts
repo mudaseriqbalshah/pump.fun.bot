@@ -5,10 +5,11 @@
  *   1. pump.fun coin info  — age, creator, market cap, community replies
  *   2. Dexscreener         — DEX trading data (volume, price change, buys/sells)
  *   3. Twitter / X API v2  — recent mentions, scam/rug keyword detection
+ *   4. GMGN.ai             — smart money activity, holder count, risk score
  *
- * All three calls run in parallel and fail silently — any missing data is
+ * All four calls run in parallel and fail silently — any missing data is
  * reported as `null` so the AI advisor can note the uncertainty rather than
- * crashing. Twitter requires `TWITTER_BEARER_TOKEN`; omit it to disable.
+ * crashing. Twitter requires `TWITTER_BEARER_TOKEN`; GMGN is unauthenticated.
  */
 
 import { logger } from '../utils/logger.js';
@@ -26,6 +27,19 @@ export interface TwitterData {
   hypeMentions: number;
   /** Sample tweet texts (up to 5, truncated to 120 chars each). */
   sampleTweets: string[];
+}
+
+export interface GmgnData {
+  /** Total unique token holders. */
+  holderCount: number | null;
+  /** Number of smart-money wallets that bought in the last 24h. */
+  smartBuy24h: number | null;
+  /** Number of smart-money wallets that sold in the last 24h. */
+  smartSell24h: number | null;
+  /** GMGN risk score 0–1 (higher = riskier). */
+  riskScore: number | null;
+  /** Whether GMGN flagged this as a honeypot. */
+  isHoneypot: boolean | null;
 }
 
 export interface TokenReputation {
@@ -55,6 +69,8 @@ export interface TokenReputation {
   dexLiquidityUsd: number | null;
   /** Twitter/X mention data (null if bearer token not configured). */
   twitter: TwitterData | null;
+  /** GMGN smart-money and risk data (null if endpoint unavailable). */
+  gmgn: GmgnData | null;
   /** Automatically detected risk signals. */
   redFlags: string[];
 }
@@ -92,6 +108,20 @@ interface TwitterSearchResponse {
   meta?: { result_count?: number };
 }
 
+interface GmgnTokenResponse {
+  code?: number;
+  data?: {
+    token?: {
+      holder_count?: number;
+      smart_buy_24h?: number;
+      smart_sell_24h?: number;
+      /** Risk score 0–100 on GMGN (we normalise to 0–1). */
+      risk?: number;
+      is_honeypot?: boolean | number;
+    };
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -99,6 +129,7 @@ interface TwitterSearchResponse {
 const PUMP_FUN_API = 'https://frontend-api.pump.fun/coins';
 const DEXSCREENER_API = 'https://api.dexscreener.com/latest/dex/tokens';
 const TWITTER_SEARCH_API = 'https://api.twitter.com/2/tweets/search/recent';
+const GMGN_TOKEN_API = 'https://gmgn.ai/defi/quotation/v1/tokens/sol';
 
 /** Rough SOL/USD rate used only for pump.fun market-cap conversion. */
 const APPROX_SOL_USD = 150;
@@ -124,17 +155,19 @@ export async function fetchTokenReputation(
   ticker: string | null = null,
   twitterBearerToken: string | null = null,
 ): Promise<TokenReputation> {
-  const [pumpResult, dexResult, twitterResult] = await Promise.allSettled([
+  const [pumpResult, dexResult, twitterResult, gmgnResult] = await Promise.allSettled([
     fetchPumpFun(tokenAddress),
     fetchDexScreener(tokenAddress),
     twitterBearerToken
       ? fetchTwitter(tokenAddress, ticker, twitterBearerToken)
       : Promise.resolve(null),
+    fetchGmgn(tokenAddress),
   ]);
 
   const pump = pumpResult.status === 'fulfilled' ? pumpResult.value : null;
   const dex = dexResult.status === 'fulfilled' ? dexResult.value : null;
   const twitter = twitterResult.status === 'fulfilled' ? twitterResult.value : null;
+  const gmgn = gmgnResult.status === 'fulfilled' ? gmgnResult.value : null;
 
   const redFlags: string[] = [];
 
@@ -200,6 +233,26 @@ export async function fetchTokenReputation(
     }
   }
 
+  // --- GMGN data ---
+  if (gmgn) {
+    if (gmgn.isHoneypot === true) {
+      redFlags.push('GMGN flagged as HONEYPOT — do not buy');
+    }
+    if (gmgn.riskScore !== null && gmgn.riskScore > 0.7) {
+      redFlags.push(`GMGN high risk score: ${(gmgn.riskScore * 100).toFixed(0)}/100`);
+    }
+    if (
+      gmgn.smartBuy24h !== null &&
+      gmgn.smartSell24h !== null &&
+      gmgn.smartSell24h > gmgn.smartBuy24h * 2 &&
+      gmgn.smartSell24h > 2
+    ) {
+      redFlags.push(
+        `Smart money selling: ${gmgn.smartSell24h} smart sells vs ${gmgn.smartBuy24h} smart buys`,
+      );
+    }
+  }
+
   const rep: TokenReputation = {
     name: pump?.name ?? null,
     symbol: pump?.symbol ?? null,
@@ -214,6 +267,7 @@ export async function fetchTokenReputation(
     dexSells24h,
     dexLiquidityUsd,
     twitter,
+    gmgn,
     redFlags,
   };
 
@@ -224,6 +278,8 @@ export async function fetchTokenReputation(
       pumpFunMarketCapSol,
       dexListed,
       twitterMentions: twitter?.mentionCount ?? 'disabled',
+      gmgnSmartBuy: gmgn?.smartBuy24h ?? 'unavailable',
+      gmgnHoneypot: gmgn?.isHoneypot ?? 'unavailable',
       redFlags,
     },
     'TokenReputation fetched',
@@ -323,6 +379,55 @@ async function fetchTwitter(
     return { mentionCount: count, scamMentions, hypeMentions, sampleTweets };
   } catch (err) {
     logger.debug({ tokenAddress, err }, 'TokenReputation: Twitter fetch failed (non-fatal)');
+    return null;
+  }
+}
+
+async function fetchGmgn(tokenAddress: string): Promise<GmgnData | null> {
+  try {
+    const res = await fetch(`${GMGN_TOKEN_API}/${tokenAddress}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        Accept: 'application/json',
+        Referer: 'https://gmgn.ai/',
+      },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+
+    if (!res.ok) {
+      logger.debug(
+        { tokenAddress, status: res.status },
+        'TokenReputation: GMGN fetch failed (non-fatal)',
+      );
+      return null;
+    }
+
+    const body = (await res.json()) as GmgnTokenResponse;
+    if (body.code !== 0 || !body.data?.token) return null;
+
+    const t = body.data.token;
+    const riskRaw = t.risk ?? null;
+    const isHoneypot =
+      t.is_honeypot === true || t.is_honeypot === 1 ? true
+      : t.is_honeypot === false || t.is_honeypot === 0 ? false
+      : null;
+
+    const data: GmgnData = {
+      holderCount: t.holder_count ?? null,
+      smartBuy24h: t.smart_buy_24h ?? null,
+      smartSell24h: t.smart_sell_24h ?? null,
+      riskScore: riskRaw != null ? riskRaw / 100 : null,
+      isHoneypot,
+    };
+
+    logger.debug(
+      { tokenAddress, ...data },
+      'TokenReputation: GMGN data fetched',
+    );
+
+    return data;
+  } catch (err) {
+    logger.debug({ tokenAddress, err }, 'TokenReputation: GMGN fetch failed (non-fatal)');
     return null;
   }
 }

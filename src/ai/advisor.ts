@@ -358,6 +358,19 @@ function buildBuyPrompt(
     } else {
       lines.push('Twitter: not configured (no TWITTER_BEARER_TOKEN)');
     }
+    if (reputation.gmgn) {
+      const g = reputation.gmgn;
+      lines.push(
+        '',
+        '### GMGN Smart Money',
+        `Holders: ${g.holderCount ?? '?'}`,
+        `Smart buys 24h: ${g.smartBuy24h ?? '?'}  |  Smart sells 24h: ${g.smartSell24h ?? '?'}`,
+        `Risk score: ${g.riskScore != null ? `${(g.riskScore * 100).toFixed(0)}/100` : '?'}`,
+        `Honeypot: ${g.isHoneypot === true ? '⚠ YES' : g.isHoneypot === false ? 'No' : 'Unknown'}`,
+      );
+    } else {
+      lines.push('GMGN: data unavailable (endpoint may require whitelisting)');
+    }
     if (reputation.redFlags.length > 0) {
       lines.push(`⚠ Red flags: ${reputation.redFlags.join(' | ')}`);
     } else {
