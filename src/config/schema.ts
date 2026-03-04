@@ -23,13 +23,13 @@ export const EnvSchema = z.object({
   RPC_URL_9: z.string().url().optional(),
   RPC_URL_10: z.string().url().optional(),
 
-  // Telegram user account (gramjs / MTProto)
-  TELEGRAM_API_ID: z.string().min(1, 'TELEGRAM_API_ID is required'),
-  TELEGRAM_API_HASH: z.string().min(1, 'TELEGRAM_API_HASH is required'),
-  TELEGRAM_PHONE: z.string().min(1, 'TELEGRAM_PHONE is required'),
+  // Telegram user account (gramjs / MTProto) — only required when telegram.enabled: true
+  TELEGRAM_API_ID: z.string().default(''),
+  TELEGRAM_API_HASH: z.string().default(''),
+  TELEGRAM_PHONE: z.string().default(''),
 
-  // Discord bot
-  DISCORD_BOT_TOKEN: z.string().min(1, 'DISCORD_BOT_TOKEN is required'),
+  // Discord bot — only required when discord.enabled: true
+  DISCORD_BOT_TOKEN: z.string().default(''),
 
   // Notification Telegram bot (optional — omit to disable notifications)
   NOTIFY_TELEGRAM_BOT_TOKEN: z.string().default(''),
@@ -89,9 +89,11 @@ const NotificationsConfigSchema = z.object({
 export const YamlConfigSchema = z.object({
   rpc: RpcConfigSchema,
   telegram: z.object({
+    enabled: z.boolean().default(true),
     channels: z.array(TelegramChannelSchema).default([]),
   }),
   discord: z.object({
+    enabled: z.boolean().default(true),
     channels: z.array(DiscordChannelSchema).default([]),
   }),
   trading: TradingConfigSchema,

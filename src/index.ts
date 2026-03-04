@@ -84,17 +84,27 @@ async function main(): Promise<void> {
   );
 
   // 8. Signal pipeline
-  const telegramMonitor = new TelegramMonitor({
-    apiId: Number(env.TELEGRAM_API_ID),
-    apiHash: env.TELEGRAM_API_HASH,
-    phone: env.TELEGRAM_PHONE,
-    channels: yamlConfig.telegram.channels,
-  });
+  const telegramMonitor = yamlConfig.telegram.enabled
+    ? new TelegramMonitor({
+        apiId: Number(env.TELEGRAM_API_ID),
+        apiHash: env.TELEGRAM_API_HASH,
+        phone: env.TELEGRAM_PHONE,
+        channels: yamlConfig.telegram.channels,
+      })
+    : null;
 
-  const discordMonitor = new DiscordMonitor({
-    token: env.DISCORD_BOT_TOKEN,
-    channels: yamlConfig.discord.channels,
-  });
+  const discordMonitor = yamlConfig.discord.enabled
+    ? new DiscordMonitor({
+        token: env.DISCORD_BOT_TOKEN,
+        channels: yamlConfig.discord.channels,
+      })
+    : null;
+
+  if (telegramMonitor) logger.info('Telegram monitor enabled');
+  else logger.info('Telegram monitor disabled (telegram.enabled: false in config.yaml)');
+
+  if (discordMonitor) logger.info('Discord monitor enabled');
+  else logger.info('Discord monitor disabled (discord.enabled: false in config.yaml)');
 
   const aggregator = new SignalAggregator(
     {
@@ -109,8 +119,8 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
 
   // Monitors → aggregator
-  aggregator.register(telegramMonitor);
-  aggregator.register(discordMonitor);
+  if (telegramMonitor) aggregator.register(telegramMonitor);
+  if (discordMonitor) aggregator.register(discordMonitor);
 
   // Track when positions were opened so we can report hold time.
   const openedAt = new Map<string, number>();
@@ -210,8 +220,8 @@ async function main(): Promise<void> {
   scanner.start();
 
   // Telegram auth is interactive on first run (OTP prompt) — must be awaited.
-  await telegramMonitor.start();
-  await discordMonitor.start();
+  if (telegramMonitor) await telegramMonitor.start();
+  if (discordMonitor) await discordMonitor.start();
 
   logger.info('All services running — bot is live');
 
@@ -232,8 +242,8 @@ async function main(): Promise<void> {
       positionTracker.stop();
       aggregator.stop();
       rpcHealth.stop();
-      await discordMonitor.stop();
-      await telegramMonitor.stop();
+      if (discordMonitor) await discordMonitor.stop();
+      if (telegramMonitor) await telegramMonitor.stop();
     } catch (err) {
       logger.warn({ err }, 'Error during shutdown (non-fatal)');
     }

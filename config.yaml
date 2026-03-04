@@ -8,15 +8,18 @@ rpc:
   health_check_interval_s: 30
 
 telegram:
+  enabled: false               # set to true to enable Telegram signal monitor
   channels:
     - id: -1001234567890
-      name: "alpha-calls"
-      weight: 1.0
+      name: "channel-name"
+      weight: 0.9    # high trust
     - id: -1009876543210
-      name: "gem-calls"
-      weight: 0.8
+      name: "another-channel"
+      weight: 0.6    # lower trust, needs multi-source confirmation
+
 
 discord:
+  enabled: false               # set to true to enable Discord signal monitor
   channels:
     - id: "1234567890123456789"
       name: "pump-calls"
@@ -24,8 +27,8 @@ discord:
 
 trading:
   wallet_keypair_path: ~/.config/solana/id.json
-  max_position_sol: 0.5          # max SOL to spend per trade
-  max_open_positions: 5          # max concurrent open positions
+  max_position_sol: 0.2          # max SOL to spend per trade
+  max_open_positions: 2          # max concurrent open positions
   max_daily_loss_sol: 3.0        # hard stop: halt trading for the day
   max_bonding_curve_pct: 50      # only buy if bonding curve < 50% complete
   min_signal_confidence: 0.6     # minimum confidence score to act on a signal
