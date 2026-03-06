@@ -6,15 +6,16 @@ A TypeScript trading bot that monitors Discord and Telegram channels for pump.fu
 
 ## How it works
 
-1. **Signal detection** — Monitors configured Telegram channels (via MTProto user account) and Discord channels (via bot token) for pump.fun token contract addresses. Each message is scored for confidence based on keyword hype and channel weight.
+1. **Signal detection** — Monitors configured Telegram channels (via MTProto user account) and Discord channels (via bot token) for pump.fun token contract addresses. Each monitor can be toggled on/off in `config.yaml`. Each message is scored for confidence based on keyword hype and channel weight.
 2. **Aggregation** — Signals for the same token within a 60-second window are deduplicated. Multi-source signals (seen on both Telegram and Discord) get a +0.2 confidence boost.
-3. **AI buy evaluation** *(optional)* — Each qualified signal is evaluated by `gpt-4o` before any buy is attempted. The model sees the signal message, bonding curve state, portfolio context, and bot config, then decides whether to buy and at what position size. If `OPENAI_API_KEY` is not set, this step is skipped entirely.
-4. **Risk checks** — Before buying, the bot checks: minimum signal confidence, bonding curve completion %, max open positions, daily loss limit, and duplicate position guard.
-5. **Buy** — Executes via `pumpdotfun-sdk` on the bonding curve, with retry across multiple RPC endpoints.
-6. **Position tracking** — Polls the bonding curve every 10 seconds. When graduation is detected, switches to watching for a Raydium CPMM pool (event-driven) with Jupiter as a fallback.
-7. **AI sell evaluation** *(optional)* — While a position is open, `gpt-4o-mini` is consulted every 5 minutes per token. It can recommend an early exit (`immediate` urgency bypasses thresholds; `normal` urgency acts only when thresholds are also met). Stop-loss always fires regardless of AI opinion.
-8. **Sell** — Once the DEX is live, quotes token → WSOL via Jupiter on every tick. Sells when PnL hits profit target (+200% default), stop-loss (−30% default), or an AI early-exit recommendation.
-9. **Notifications** — Sends Telegram alerts for buys, sells (💰 profit / 🔴 stop-loss / 🤖 AI early exit), and risk denials.
+3. **Token reputation** *(runs in parallel before buy)* — Fetches data from four sources simultaneously: pump.fun (age, market cap, creator, replies), Dexscreener (DEX volume, price change, liquidity, buy/sell ratio), Twitter/X API (mention count, scam/hype keyword detection, sample tweets), and GMGN.ai (holder count, smart money activity, risk score, honeypot flag). Any source that fails is silently skipped — the AI notes the missing data instead of crashing.
+4. **AI buy evaluation** *(optional)* — Each qualified signal is evaluated by `gpt-4o` before any buy is attempted. The model sees the signal message, bonding curve state, full token reputation report, portfolio context, and historical trade performance per channel, then decides whether to buy and at what position size. If `OPENAI_API_KEY` is not set, this step is skipped entirely.
+5. **Risk checks** — Before buying, the bot checks: minimum signal confidence, bonding curve completion %, max open positions, daily loss limit, and duplicate position guard.
+6. **Buy** — Executes via `pumpdotfun-sdk` on the bonding curve, with retry across multiple RPC endpoints.
+7. **Position tracking** — Polls the bonding curve every 10 seconds. When graduation is detected, switches to watching for a Raydium CPMM pool (event-driven) with Jupiter as a fallback.
+8. **AI sell evaluation** *(optional)* — While a position is open, `gpt-4o-mini` is consulted every 5 minutes per token. It receives current PnL, hold time, price velocity (% change per minute over the last 2 minutes), and the configured thresholds. It can recommend an early exit (`immediate` urgency bypasses thresholds; `normal` urgency acts only when thresholds are also met). Stop-loss always fires regardless of AI opinion.
+9. **Sell** — Once the DEX is live, quotes token → WSOL via Jupiter on every tick. Sells when PnL hits profit target (+200% default), stop-loss (−30% default), or an AI early-exit recommendation.
+10. **Notifications** — Sends Telegram alerts for buys, sells (💰 profit / 🔴 stop-loss / 🤖 AI early exit), and risk denials.
 
 ---
 
@@ -24,9 +25,10 @@ A TypeScript trading bot that monitors Discord and Telegram channels for pump.fu
 - **pnpm** (`npm install -g pnpm`)
 - **QuickNode** Solana mainnet endpoint(s)
 - **Solana wallet** with SOL funded for trading
-- **Telegram API credentials** — from [my.telegram.org/apps](https://my.telegram.org/apps)
-- **Discord bot token** — from [discord.com/developers](https://discord.com/developers/applications)
+- **Telegram API credentials** *(optional)* — from [my.telegram.org/apps](https://my.telegram.org/apps) — only needed when `telegram.enabled: true`
+- **Discord bot token** *(optional)* — from [discord.com/developers](https://discord.com/developers/applications) — only needed when `discord.enabled: true`
 - **OpenAI API key** *(optional)* — from [platform.openai.com/api-keys](https://platform.openai.com/api-keys) — enables AI advisor
+- **Twitter/X Bearer Token** *(optional)* — from [developer.twitter.com](https://developer.twitter.com) — enables Twitter reputation check
 
 ---
 
@@ -48,7 +50,7 @@ pnpm setup-db
 
 ### First run (interactive Telegram auth)
 
-The first time the bot starts, gramjs will prompt you for a one-time Telegram OTP. After entering it, the session is saved to `data/telegram.session` and all future starts are non-interactive.
+The first time the bot starts with Telegram enabled, gramjs will prompt you for a one-time OTP. After entering it, the session is saved to `data/telegram.session` and all future starts are non-interactive.
 
 ```bash
 pnpm dev   # runs via tsx — hot reload, shows OTP prompt in terminal
@@ -64,13 +66,14 @@ pnpm dev   # runs via tsx — hot reload, shows OTP prompt in terminal
 |---|---|---|
 | `WALLET_PRIVATE_KEY` | Yes | Base58 private key of the trading wallet |
 | `RPC_URL_1` … `RPC_URL_10` | At least 1 | QuickNode (or other) Solana RPC URLs |
-| `TELEGRAM_API_ID` | Yes | From my.telegram.org/apps |
-| `TELEGRAM_API_HASH` | Yes | From my.telegram.org/apps |
-| `TELEGRAM_PHONE` | Yes | Phone number linked to your Telegram account |
-| `DISCORD_BOT_TOKEN` | Yes | Discord bot token |
+| `TELEGRAM_API_ID` | When telegram enabled | From my.telegram.org/apps |
+| `TELEGRAM_API_HASH` | When telegram enabled | From my.telegram.org/apps |
+| `TELEGRAM_PHONE` | When telegram enabled | Phone number linked to your Telegram account |
+| `DISCORD_BOT_TOKEN` | When discord enabled | Discord bot token |
 | `NOTIFY_TELEGRAM_BOT_TOKEN` | No | Bot token for trade alert notifications |
 | `NOTIFY_TELEGRAM_CHAT_ID` | No | Chat/channel ID to receive alerts |
 | `OPENAI_API_KEY` | No | Enables AI buy/sell advisor (gpt-4o + gpt-4o-mini) |
+| `TWITTER_BEARER_TOKEN` | No | Enables Twitter/X reputation check in AI buy evaluation |
 
 ### `config.yaml`
 
@@ -78,6 +81,8 @@ pnpm dev   # runs via tsx — hot reload, shows OTP prompt in terminal
 |---|---|---|
 | `rpc.strategy` | `round-robin` | `round-robin` / `fastest` / `failover` |
 | `rpc.health_check_interval_s` | `30` | How often to ping RPC endpoints |
+| `telegram.enabled` | `true` | Set to `false` to disable the Telegram monitor entirely |
+| `discord.enabled` | `true` | Set to `false` to disable the Discord monitor entirely |
 | `trading.max_position_sol` | `0.5` | Max SOL per trade |
 | `trading.max_open_positions` | `5` | Max concurrent positions |
 | `trading.max_daily_loss_sol` | `3.0` | Daily loss hard stop |
@@ -93,12 +98,14 @@ pnpm dev   # runs via tsx — hot reload, shows OTP prompt in terminal
 
 ```yaml
 telegram:
+  enabled: true              # set to false to disable entirely
   channels:
     - id: -1001234567890     # channel numeric ID
       name: "alpha-calls"
       weight: 1.0            # 0.0–1.0, scales confidence score
 
 discord:
+  enabled: true              # set to false to disable entirely
   channels:
     - id: "1234567890123456789"   # channel snowflake ID
       name: "pump-calls"
@@ -182,7 +189,8 @@ pump-fun-bot/
 │   │   ├── schema.sql            # Tables: signals, trades, positions, rpc_stats
 │   │   └── client.ts             # better-sqlite3 singleton + typed query methods
 │   ├── ai/
-│   │   └── advisor.ts            # AI trading advisor (OpenAI gpt-4o buy / gpt-4o-mini sell)
+│   │   ├── advisor.ts            # AI trading advisor (OpenAI gpt-4o buy / gpt-4o-mini sell)
+│   │   └── reputation.ts         # Token reputation fetcher (pump.fun, Dexscreener, Twitter, GMGN)
 │   ├── notifications/
 │   │   └── telegram.ts           # Telegram Bot API notifier (buy / sell / risk alerts)
 │   └── utils/
@@ -244,6 +252,8 @@ Called once per qualified signal, before any buy is attempted. The model receive
 - Signal source, ticker, raw message text (first 400 chars), confidence score
 - Bonding curve progress % and market cap in SOL
 - Current open position count, today's realised PnL, and bot config limits
+- **Token reputation report** — age, pump.fun market cap and replies, DEX volume/liquidity/price change, Twitter mention count with scam/hype keyword breakdown, GMGN smart money buys/sells, risk score, and honeypot flag
+- **Historical trade stats** — overall win rate, average PnL, and a per-channel breakdown so the model can down-weight unreliable signal sources
 
 It returns a structured JSON decision:
 
@@ -259,7 +269,7 @@ If `buy = false` the signal is dropped and logged. If `positionSizeMult < 1.0` t
 
 ### Sell decisions — `gpt-4o-mini`
 
-Called during every sell evaluation tick (throttled to once per 5 minutes per token). The model receives the current PnL % and SOL, hold time in minutes, and the configured profit/stop thresholds.
+Called during every sell evaluation tick (throttled to once per 5 minutes per token). The model receives the current PnL % and SOL, hold time in minutes, **price velocity** (% per minute over the last 2 minutes), and the configured profit/stop thresholds.
 
 It returns:
 
@@ -270,6 +280,29 @@ It returns:
 | `reasoning` | string | One-sentence explanation |
 
 **Safety invariant:** stop-loss always fires regardless of the AI's decision. The AI can only recommend *additional* exits, not block mandatory ones.
+
+### Token reputation sources
+
+| Source | Data | Required |
+|---|---|---|
+| pump.fun API | Token age, creator, market cap in SOL, community reply count | No |
+| Dexscreener | 24h DEX volume, price change %, buy/sell tx counts, liquidity | No |
+| Twitter/X API v2 | Mention count, scam keyword hits, hype keyword hits, sample tweets | Needs `TWITTER_BEARER_TOKEN` |
+| GMGN.ai | Holder count, smart-money buy/sell 24h, risk score (0–100), honeypot flag | No (unauthenticated) |
+
+All four run in parallel with a 6-second timeout each. Any that fail are silently skipped and reported as `null` — the AI notes the uncertainty instead of refusing to decide.
+
+Auto-detected red flags (logged and passed to the model):
+- Token created < 1 minute ago (possible front-run)
+- Market cap already > 70 SOL (very late entry)
+- Zero community replies on pump.fun
+- DEX price down > 60% in 24h (likely already dumped)
+- DEX liquidity < $500 (extreme slippage risk)
+- Sell txns > 3× buy txns in 24h
+- Any scam/rug keywords in Twitter mentions
+- GMGN honeypot flag
+- GMGN risk score > 70/100
+- Smart-money sells > 2× smart-money buys
 
 ### Fallback behaviour
 
